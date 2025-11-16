@@ -1,0 +1,24 @@
+# FastAPI e servidor
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.12
+
+# LlamaIndex e LLMs (versões compatíveis - usar versões mais recentes)
+llama-index-core>=0.12.0
+llama-index-readers-file>=0.4.0
+llama-index-llms-openai>=0.6.0
+llama-index-llms-ollama>=0.9.0
+
+# OCR
+paddleocr>=2.7.3
+pytesseract>=0.3.13
+Pillow>=10.4.0
+
+# Utilitários
+python-dotenv>=1.0.1
+pydantic>=2.9.2
+
+# Opcional: para melhor performance
+numpy>=1.26.4
+opencv-python-headless>=4.10.0.84
+

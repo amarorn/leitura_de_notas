@@ -1,15 +1,18 @@
 {
   "name": "sistema-boletim",
-  "version": "1.0.0",
-  "description": "Sistema de análise de boletim escolar com OCR",
-  "main": "server/index.js",
+  "version": "2.0.0",
+  "description": "Sistema de análise de boletim escolar com LlamaIndex + OCR",
+  "main": "server_python/main.py",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\"",
-    "server": "cd server && npx nodemon index.js",
+    "server": "cd server_python && ./run.sh",
+    "server:node": "cd server && npx nodemon index.js",
     "client": "cd client && npm start",
-    "install-all": "npm install && cd server && npm install && cd ../client && npm install"
+    "install-all": "npm install && cd client && npm install && npm run install:python",
+    "install:python": "cd ../server_python && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt",
+    "setup:python": "cd server_python && python3 -m venv venv && source venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt"
   },
-  "keywords": ["boletim", "ocr", "educacao"],
+  "keywords": ["boletim", "ocr", "educacao", "llamaindex", "ai"],
   "author": "",
   "license": "MIT",
   "devDependencies": {
