@@ -37,7 +37,7 @@ const UploadPage = ({ setDadosBoletim }) => {
     try {
       console.log('Enviando arquivo:', file.name, file.size, 'bytes');
       
-      const response = await axios.post('http://localhost:5000/api/upload', formData, {
+      const response = await axios.post('http://localhost:5001/api/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -58,7 +58,7 @@ const UploadPage = ({ setDadosBoletim }) => {
       let errorMessage = 'Erro ao processar a imagem.';
       
       if (err.code === 'ECONNREFUSED' || err.message.includes('Network Error')) {
-        errorMessage = 'Erro de conexão! Verifique se o servidor backend está rodando na porta 5000.';
+        errorMessage = 'Erro de conexão! Verifique se o servidor backend está rodando na porta 5001.';
       } else if (err.response) {
         // Erro da API
         errorMessage = err.response.data?.error || `Erro ${err.response.status}: ${err.response.statusText}`;
@@ -199,7 +199,7 @@ const UploadPage = ({ setDadosBoletim }) => {
                     <p className="font-semibold mb-1">Verifique:</p>
                     <ul className="list-disc list-inside space-y-1">
                       <li>O servidor backend está rodando? Execute: <code className="bg-red-100 px-1 rounded">cd server && npm run dev</code></li>
-                      <li>A porta 5000 está livre?</li>
+                      <li>A porta 5001 está livre?</li>
                       <li>Verifique o console do terminal do backend para mais detalhes</li>
                     </ul>
                   </div>
