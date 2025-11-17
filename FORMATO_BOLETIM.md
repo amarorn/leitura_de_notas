@@ -42,38 +42,24 @@ A tabela principal contém as seguintes colunas:
 
 ## Disciplinas Suportadas
 
-### Disciplinas Regulares
-- EMPREENDEDORISMO
-- FILOSOFIA
-- GEOGRAFIA
-- HISTÓRIA
-- REDAÇÃO
-- ÉTICA E CIDADANIA
-- CIÊNCIAS
-- EDUCAÇÃO FÍSICA
-- ENSINO DA ARTE
-- ESPANHOL
-- INGLÊS
-- LÍNGUA PORTUGUESA
-- MATEMÁTICA
+### Disciplinas do 7º Ano (13 disciplinas)
+O sistema está configurado para processar boletins do 7º ano com as seguintes disciplinas:
 
-### Disciplinas do Ensino Médio
-- SOCIOLOGIA
-- BIOLOGIA (pode ter sub-disciplinas: Biologia I, Biologia II)
-- FÍSICA (pode ter sub-disciplinas: Física I, Física II)
-- QUÍMICA
+1. EMPREENDEDORISMO
+2. FILOSOFIA
+3. GEOGRAFIA
+4. HISTÓRIA
+5. REDAÇÃO
+6. ÉTICA E CIDADANIA
+7. CIÊNCIAS
+8. EDUCAÇÃO FÍSICA
+9. ENSINO DA ARTE
+10. ESPANHOL
+11. INGLÊS
+12. LÍNGUA PORTUGUESA
+13. MATEMÁTICA
 
-### Sub-disciplinas de Língua Portuguesa
-- LITERATURA
-- ANÁLISE LINGUÍSTICA
-- PRODUÇÃO DE TEXTO
-
-### Itinerários Formativos / Eletivas
-- PROJETO DE VIDA
-- UNIDADE CURRICULAR DE HUMANAS - HISTÓRIA
-- UNIDADE CURRICULAR DE NATUREZA - BIOLOGIA
-- UNIDADE CURRICULAR DE NATUREZA - FÍSICA
-- TRAJETÓRIA DE LEITURA E ESCRITA
+**Nota**: O sistema possui validação para garantir que apenas disciplinas válidas sejam capturadas, evitando erros de OCR como "FEMES" ou duplicações.
 
 ## Padrões de Dados
 
@@ -128,14 +114,20 @@ EMPREENDEDORISMO    0    8.0    8.0    -    8.0    1.0    9.0    8.0    8.1    9
 
 1. **Reconhecimento de texto**: Tesseract.js processa a imagem
 2. **Identificação de padrões**: Sistema busca:
-   - Nome do aluno (vários formatos possíveis)
-   - Matrícula e turma
+   - Nome do aluno (vários formatos possíveis, incluindo formato tabela)
+   - Matrícula e turma (formato tabela: label em uma linha, valor na próxima)
    - Bimestre atual
    - Linhas de disciplinas e notas
-3. **Parsing de valores**: Converte strings em números, tratando:
-   - Vírgulas em decimais
-   - Traços e células vazias
+3. **Validação de disciplinas**: 
+   - Lista de 13 disciplinas válidas
+   - Rejeição de palavras proibidas (ex: "FEMES", "FALTAS")
+   - Normalização de nomes (ex: "EDUCAÇÃO FISICA" → "EDUCAÇÃO FÍSICA")
+   - Detecção e remoção de duplicatas
+4. **Parsing de valores**: Converte strings em números, tratando:
+   - Vírgulas em decimais (formato brasileiro: 8,0)
+   - Traços e células vazias (preserva posição como `null`)
    - Múltiplos formatos de dados
+   - Notas com traços são preservadas corretamente (ex: [8.0, 8.0, null])
 
 ### Cálculos
 
@@ -162,10 +154,13 @@ EMPREENDEDORISMO    0    8.0    8.0    -    8.0    1.0    9.0    8.0    8.1    9
 
 ### Dificuldades Comuns
 
-1. **Sub-disciplinas**: Podem ser identificadas como disciplinas separadas
+1. **Erros de OCR**: Palavras podem ser lidas incorretamente (ex: "FILOSOFIA" → "FILOSOF")
+   - **Solução**: Sistema possui busca flexível e normalização para corrigir erros comuns
 2. **Formatação complexa**: Tabelas muito compactas podem ter problemas
 3. **Tipografia**: Letras estilizadas ou pequenas podem ser mal interpretadas
 4. **Células mescladas**: Podem causar erros na extração
+5. **Traços em notas**: Notas não lançadas (representadas por "-") devem ser preservadas
+   - **Solução**: Sistema preserva traços como `null` nas posições corretas
 
 ### Dicas para Melhor Extração
 

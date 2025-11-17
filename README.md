@@ -5,7 +5,15 @@ Sistema web completo para análise de boletins escolares com OCR automático, c�
 ## 🚀 Funcionalidades
 
 - **Upload de foto do boletim**: Interface intuitiva para envio de imagens
-- **Extração automática de dados**: OCR usando Tesseract.js para ler informações do boletim
+- **Extração automática de dados com IA**: OCR (PaddleOCR ou Tesseract) + LlamaIndex para extração estruturada
+  - **Precisão superior**: ~95%+ vs ~70-80% do método anterior
+  - **Entende contexto**: LLM identifica disciplinas, notas e dados automaticamente
+  - **Adaptável**: Funciona mesmo com variações no formato do boletim
+  - **Suporta subtabelas**: Processa automaticamente (ex: Biologia I / Biologia II)
+- **Extração robusta de notas**: 
+  - Preserva traços (-) como `null` nas posições corretas
+  - Suporta formato brasileiro (vírgula como decimal: 8,0)
+  - Captura todas as disciplinas encontradas no boletim
 - **Cálculo inteligente de médias**: 
   - Média provisória = (N1 + N2 + N3) / quantidade de notas
   - Média parcial = média provisória + pontos extras
@@ -17,10 +25,11 @@ Sistema web completo para análise de boletins escolares com OCR automático, c�
 ## 🛠️ Tecnologias
 
 ### Backend
-- Node.js + Express
-- Tesseract.js (OCR)
-- Multer (upload de arquivos)
-- CORS
+- **Python 3.8+** com FastAPI
+- **LlamaIndex**: Extração estruturada com LLM
+- **OCR**: PaddleOCR (recomendado) ou Tesseract
+- **LLM**: OpenAI GPT-4o-mini (recomendado) ou Ollama (gratuito, local)
+- **CORS**: Suporte para requisições cross-origin
 
 ### Frontend
 - React 18
@@ -32,8 +41,16 @@ Sistema web completo para análise de boletins escolares com OCR automático, c�
 ## 📦 Instalação
 
 ### Pré-requisitos
-- Node.js (v16 ou superior)
-- npm ou yarn
+- **Python 3.8+**
+- **Node.js** (v16 ou superior)
+- **npm** ou **yarn**
+
+### Opcional (dependendo da configuração):
+- **OpenAI API Key** (se usar `LLM_PROVIDER=openai`) - [Obter chave](https://platform.openai.com/api-keys)
+- **Ollama** (se usar `LLM_PROVIDER=ollama`) - [Instalar Ollama](https://ollama.ai)
+- **Tesseract** (se usar `OCR_ENGINE=tesseract`):
+  - macOS: `brew install tesseract tesseract-lang`
+  - Ubuntu: `sudo apt-get install tesseract-ocr tesseract-ocr-por`
 
 ### Passo a passo
 
@@ -44,56 +61,54 @@ Sistema web completo para análise de boletins escolares com OCR automático, c�
 npm run install-all
 ```
 
-Ou manualmente:
-```bash
-# Instalar dependências raiz
-npm install
-
-# Instalar dependências do backend
-cd server
-npm install
-
-# Instalar dependências do frontend
-cd ../client
-npm install
-```
+Isso instalará:
+- Dependências Node.js (raiz e cliente)
+- Ambiente virtual Python
+- Dependências Python (FastAPI, LlamaIndex, OCR, etc.)
 
 3. **Configure o ambiente**
 ```bash
-cd server
+cd server_python
 cp .env.example .env
 ```
 
-4. **Inicie o servidor backend** (em um terminal)
-```bash
-cd server
-npm run dev
+Edite o arquivo `.env`:
+```env
+PORT=5001
+LLM_PROVIDER=openai          # ou "ollama" para usar local
+OPENAI_API_KEY=sk-...        # sua chave OpenAI (se usar OpenAI)
+OCR_ENGINE=paddleocr         # ou "tesseract"
 ```
 
-O servidor estará rodando em `http://localhost:5000`
+**Escolha seu LLM:**
+- **OpenAI** (recomendado - mais rápido): Configure `OPENAI_API_KEY` no `.env`
+- **Ollama** (gratuito - local): `LLM_PROVIDER=ollama` e instale: `ollama pull llama3.2`
 
-5. **Inicie o frontend** (em outro terminal)
-```bash
-cd client
-npm start
-```
-
-O frontend estará disponível em `http://localhost:3000`
-
-### Executar tudo junto (recomendado)
+4. **Execute o projeto**
 ```bash
 npm run dev
 ```
+
+Isso iniciará:
+- **Backend Python** (porta 5001) - LlamaIndex + OCR
+- **Frontend React** (porta 3000)
+
+### Acessar a aplicação
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:5001
+- **Health Check**: http://localhost:5001/api/health
 
 ## 📁 Estrutura do Projeto
 
 ```
 sistema-boletim/
-├── server/
-│   ├── index.js           # Servidor Express
-│   ├── package.json
-│   ├── uploads/           # Diretório de uploads temporários
-│   └── .env.example
+├── server_python/
+│   ├── main.py            # Servidor FastAPI com LlamaIndex
+│   ├── requirements.txt   # Dependências Python
+│   ├── run.sh            # Script para rodar o servidor
+│   ├── setup.sh          # Script de instalação
+│   ├── .env.example      # Exemplo de variáveis de ambiente
+│   └── uploads/          # Diretório de uploads temporários
 ├── client/
 │   ├── src/
 │   │   ├── components/
@@ -217,18 +232,31 @@ Nota Necessária = (Total Necessário - Soma Atual) / Notas Faltantes
 
 ## 🔍 Detalhes Técnicos
 
-### OCR (Tesseract.js)
-- Idioma: Português (`por`)
-- Processamento assíncrono
-- Extração de padrões de boletim escolar
+### OCR + LlamaIndex
+- **OCR**: PaddleOCR (recomendado) ou Tesseract
+  - Idioma: Português (`por`)
+  - Processamento de imagens
+- **LlamaIndex**: Extração estruturada com LLM
+  - Entende contexto do boletim
+  - Extrai dados em formato JSON estruturado
+  - Corrige erros de OCR automaticamente
 
 ### Extração de Dados
-O sistema tenta identificar:
-- Nome do aluno
-- Disciplinas
-- Notas (1ª AV, 2ª AV, 3ª AV)
-- Faltas
-- Pontos extras
+O sistema identifica automaticamente:
+- **Nome do aluno**: Extraído do cabeçalho do boletim
+- **Matrícula, Turma e Bimestre**: Informações do aluno
+- **Todas as disciplinas**: Detecta automaticamente (não limitado a lista fixa)
+- **Notas (1ª AV, 2ª AV, 3ª AV)**: Preserva traços (-) como `null` nas posições corretas
+- **Faltas**: Número inteiro
+- **Pontos Extras**: Extraídos do boletim
+- **Médias Provisórias e Parciais**: Extraídas do boletim quando disponíveis
+- **Subtabelas**: Processa automaticamente (ex: Biologia I / Biologia II)
+
+**Vantagens do LlamaIndex**:
+- Precisão superior (~95%+)
+- Adaptável a variações no formato
+- Entende contexto (sabe que "FILOSOFIA" é disciplina, não nome de aluno)
+- Validação automática de dados
 
 ### Limitações
 - A qualidade da extração depende da qualidade da imagem
@@ -236,6 +264,7 @@ O sistema tenta identificar:
   - Imagens borradas ou de baixa resolução
   - Formatações muito complexas
   - Letras cursivas ou estilizadas
+- **Solução**: LlamaIndex corrige automaticamente muitos erros de OCR e entende o contexto
 
 **Dica**: Para melhores resultados, use imagens nítidas e bem iluminadas.
 

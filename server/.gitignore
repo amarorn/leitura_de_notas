@@ -1,9 +1,0 @@
-uploads/
-*.jpg
-*.jpeg
-*.png
-*.gif
-*.webp
-.env
-node_modules/
-

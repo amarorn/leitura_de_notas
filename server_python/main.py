@@ -8,6 +8,8 @@ from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, Settings, 
 from llama_index.readers.file import ImageReader
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.ollama import Ollama
+from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 import os
 import shutil
 import tempfile
@@ -52,15 +54,52 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")  # "openai" ou "ollama"
 
 if LLM_PROVIDER == "openai":
     api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        print("⚠️  OPENAI_API_KEY não encontrada. Usando Ollama como fallback.")
+    # Verificar se a chave é válida (não é a chave de exemplo)
+    if not api_key or api_key.strip() == "" or "sua-chave" in api_key.lower() or "your-api-key" in api_key.lower():
+        print("⚠️  OPENAI_API_KEY não configurada ou é uma chave de exemplo.")
+        print("🔄 Usando Ollama como fallback (gratuito e local).")
+        print("💡 Para usar OpenAI, configure uma chave válida em server_python/.env")
         LLM_PROVIDER = "ollama"
     else:
         Settings.llm = OpenAI(api_key=api_key, model="gpt-4o-mini", temperature=0)
-        print("✅ Usando OpenAI GPT-4o-mini")
-else:
-    Settings.llm = Ollama(model="llama3.2", request_timeout=120.0)
-    print("✅ Usando Ollama (llama3.2)")
+        # Usar modelo de embeddings mais recente e disponível
+        try:
+            Settings.embed_model = OpenAIEmbedding(
+                api_key=api_key,
+                model="text-embedding-3-small"  # Modelo mais recente e disponível
+            )
+            print("✅ Usando OpenAI GPT-4o-mini com embeddings text-embedding-3-small")
+        except Exception as e:
+            print(f"⚠️  Erro ao configurar embeddings: {e}")
+            print("🔄 Tentando com modelo alternativo...")
+            try:
+                Settings.embed_model = OpenAIEmbedding(
+                    api_key=api_key,
+                    model="text-embedding-ada-002"
+                )
+                print("✅ Usando OpenAI GPT-4o-mini com embeddings text-embedding-ada-002")
+            except Exception as e2:
+                print(f"❌ Erro ao configurar embeddings alternativo: {e2}")
+                print("💡 Usando embeddings locais (HuggingFace) como fallback...")
+                try:
+                    # Usar embeddings locais do HuggingFace
+                    Settings.embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+                    print("✅ Usando embeddings locais (HuggingFace)")
+                except Exception as e3:
+                    print(f"⚠️  Erro ao configurar embeddings locais: {e3}")
+                    print("💡 Continuando sem embeddings customizados (usando padrão do LlamaIndex)")
+                    # Não configurar embed_model, deixar LlamaIndex usar o padrão
+if LLM_PROVIDER == "ollama":
+    try:
+        Settings.llm = Ollama(model="llama3.2", request_timeout=120.0)
+        # Ollama não precisa de embeddings separados, usa os do modelo
+        print("✅ Usando Ollama (llama3.2)")
+        print("💡 Certifique-se de que o Ollama está rodando: ollama serve")
+    except Exception as e:
+        print(f"❌ Erro ao configurar Ollama: {e}")
+        print("💡 Instale o Ollama: brew install ollama")
+        print("💡 Ou configure uma chave OpenAI válida no arquivo .env")
+        raise
 
 # OCR Engine (paddleocr ou tesseract)
 OCR_ENGINE = os.getenv("OCR_ENGINE", "paddleocr")  # "paddleocr" ou "tesseract"
@@ -130,7 +169,33 @@ def extract_text_with_ocr(image_path: str) -> str:
             raise HTTPException(status_code=500, detail="PaddleOCR não está instalado. Execute: pip install paddleocr")
         
         try:
-            ocr = PaddleOCR(use_angle_cls=True, lang='por', show_log=False)
+            # Tentar inicializar PaddleOCR com português
+            # Se falhar, tentar inglês como fallback
+            ocr = None
+            try:
+                ocr = PaddleOCR(use_angle_cls=True, lang='por')
+                print("✅ PaddleOCR inicializado com português")
+            except Exception as e:
+                print(f"⚠️  Erro ao inicializar PaddleOCR com 'por': {e}")
+                try:
+                    print("🔄 Tentando com 'en' (inglês) como fallback...")
+                    ocr = PaddleOCR(use_angle_cls=True, lang='en')
+                    print("✅ PaddleOCR inicializado com inglês")
+                except Exception as e2:
+                    print(f"❌ Erro ao inicializar PaddleOCR com 'en': {e2}")
+                    # Se Tesseract estiver disponível, usar como fallback
+                    if TESSERACT_AVAILABLE:
+                        print("🔄 Fallback automático para Tesseract...")
+                        return extract_text_with_tesseract(image_path)
+                    else:
+                        raise HTTPException(
+                            status_code=500, 
+                            detail=f"PaddleOCR falhou e Tesseract não está disponível. Erro: {str(e2)}"
+                        )
+            
+            if ocr is None:
+                raise HTTPException(status_code=500, detail="Não foi possível inicializar PaddleOCR")
+            
             result = ocr.ocr(image_path, cls=True)
             
             # Extrair texto de todos os resultados
@@ -143,24 +208,48 @@ def extract_text_with_ocr(image_path: str) -> str:
             text = "\n".join(text_lines)
             print(f"✅ OCR concluído. Texto extraído: {len(text)} caracteres")
             return text
+        except HTTPException:
+            raise
         except Exception as e:
             print(f"❌ Erro no PaddleOCR: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Erro no OCR: {str(e)}")
+            # Se Tesseract estiver disponível, usar como fallback
+            if TESSERACT_AVAILABLE:
+                print("🔄 Fallback automático para Tesseract devido a erro no PaddleOCR...")
+                try:
+                    return extract_text_with_tesseract(image_path)
+                except Exception as e2:
+                    raise HTTPException(status_code=500, detail=f"Erro no OCR (PaddleOCR e Tesseract falharam): {str(e2)}")
+            else:
+                raise HTTPException(status_code=500, detail=f"Erro no OCR: {str(e)}")
     
     elif OCR_ENGINE == "tesseract":
-        if not TESSERACT_AVAILABLE:
-            raise HTTPException(status_code=500, detail="Tesseract não está instalado. Execute: pip install pytesseract pillow")
-        
-        try:
-            image = Image.open(image_path)
-            text = pytesseract.image_to_string(image, lang='por')
-            print(f"✅ OCR concluído. Texto extraído: {len(text)} caracteres")
-            return text
-        except Exception as e:
-            print(f"❌ Erro no Tesseract: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Erro no OCR: {str(e)}")
+        return extract_text_with_tesseract(image_path)
     else:
         raise HTTPException(status_code=500, detail=f"OCR engine '{OCR_ENGINE}' não suportado. Use 'paddleocr' ou 'tesseract'")
+
+
+def extract_text_with_tesseract(image_path: str) -> str:
+    """
+    Extrai texto usando Tesseract OCR
+    """
+    if not TESSERACT_AVAILABLE:
+        raise HTTPException(status_code=500, detail="Tesseract não está instalado. Execute: pip install pytesseract pillow")
+    
+    try:
+        image = Image.open(image_path)
+        # Tentar português primeiro, se falhar usar inglês
+        try:
+            text = pytesseract.image_to_string(image, lang='por')
+        except Exception as e:
+            print(f"⚠️  Erro ao usar Tesseract com 'por': {e}")
+            print("🔄 Tentando com 'eng' (inglês)...")
+            text = pytesseract.image_to_string(image, lang='eng')
+        
+        print(f"✅ OCR concluído. Texto extraído: {len(text)} caracteres")
+        return text
+    except Exception as e:
+        print(f"❌ Erro no Tesseract: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro no OCR: {str(e)}")
 
 
 def extract_boletim_data_with_llamaindex(image_path: str) -> dict:
@@ -248,7 +337,21 @@ Extraia todos os dados visíveis no boletim e retorne o JSON completo.
         
         # Extrair dados estruturados
         print("🤖 Processando com LLM para extração estruturada...")
-        response = query_engine.query(extraction_prompt)
+        try:
+            response = query_engine.query(extraction_prompt)
+        except Exception as e:
+            error_msg = str(e)
+            if "invalid_api_key" in error_msg.lower() or "incorrect api key" in error_msg.lower() or "401" in error_msg:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Chave da API OpenAI inválida. Configure uma chave válida em server_python/.env ou use Ollama (gratuito). Veja CONFIGURACAO_LLM.md para mais detalhes."
+                )
+            elif "model_not_found" in error_msg.lower() or "does not have access" in error_msg.lower() or "403" in error_msg or "text-embedding" in error_msg.lower():
+                raise HTTPException(
+                    status_code=403,
+                    detail="Modelo de embeddings não disponível no seu projeto OpenAI. Reinicie o servidor para usar embeddings locais como fallback."
+                )
+            raise
         
         # Parsear resposta JSON
         response_text = str(response).strip()

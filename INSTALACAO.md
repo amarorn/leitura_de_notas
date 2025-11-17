@@ -33,9 +33,11 @@ cp .env.example .env
 Edite o arquivo `.env` se necessário:
 
 ```env
-PORT=5000
+PORT=5001
 NODE_ENV=development
 ```
+
+**Nota**: A porta padrão é 5001 porque no macOS a porta 5000 é usada pelo AirPlay Receiver.
 
 ### 3. Executar o Projeto
 
@@ -48,7 +50,7 @@ npm run dev
 ```
 
 Isso iniciará:
-- Backend na porta 5000
+- Backend na porta 5001
 - Frontend na porta 3000
 
 #### Opção B: Executar separadamente
@@ -69,7 +71,7 @@ npm start
 
 Abra seu navegador em:
 - **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:5000/api/health
+- **Backend API**: http://localhost:5001/api/health
 
 ## Verificação
 
@@ -77,7 +79,7 @@ Para verificar se tudo está funcionando:
 
 1. Acesse http://localhost:3000
 2. Você deve ver a tela de upload
-3. Verifique o backend acessando http://localhost:5000/api/health
+3. Verifique o backend acessando http://localhost:5001/api/health
 
 ## Troubleshooting
 

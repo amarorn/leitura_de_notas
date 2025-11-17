@@ -13,31 +13,33 @@ cd server
 npm run dev
 
 # Você deve ver:
-# 🚀 Servidor rodando na porta 5000
-# 📡 API disponível em http://localhost:5000
+# 🚀 Servidor rodando na porta 5001
+# 📡 API disponível em http://localhost:5001
 ```
 
-### 2. Erro: "Port 5000 already in use"
+### 2. Erro: "Port 5001 already in use" ou "EADDRINUSE"
 
-**Causa**: A porta 5000 já está sendo usada por outro processo.
+**Causa**: A porta 5001 já está sendo usada por outro processo.
 
 **Solução**:
 ```bash
-# Opção 1: Encerrar o processo na porta 5000
+# Opção 1: Encerrar o processo na porta 5001
 # No Mac/Linux:
-lsof -ti:5000 | xargs kill -9
+lsof -ti:5001 | xargs kill -9
 
 # No Windows:
-netstat -ano | findstr :5000
+netstat -ano | findstr :5001
 taskkill /PID <PID> /F
 
 # Opção 2: Usar outra porta
 # Edite server/.env:
-PORT=5001
+PORT=5002
 
-# E atualize client/src/components/UploadPage.js:
-# Mude 'http://localhost:5000' para 'http://localhost:5001'
+# E atualize client/src/components/UploadPage.js e Dashboard.js:
+# Mude 'http://localhost:5001' para 'http://localhost:5002'
 ```
+
+**Nota**: A porta padrão foi alterada de 5000 para 5001 porque no macOS a porta 5000 é usada pelo AirPlay Receiver.
 
 ### 3. Erro: "Servidor não respondeu"x`x`x`
 
@@ -106,7 +108,7 @@ app.use(cors({
 
 1. **Backend está rodando?**
    ```bash
-   curl http://localhost:5000/api/health
+   curl http://localhost:5001/api/health
    # Deve retornar: {"status":"OK","message":"Servidor rodando"}
    ```
 
@@ -126,7 +128,7 @@ app.use(cors({
    ```
 
 4. **Portas livres?**
-   - Backend: 5000
+   - Backend: 5001 (padrão, pode ser alterado no .env)
    - Frontend: 3000
 
 5. **Arquivo válido?**
@@ -189,7 +191,7 @@ Resposta recebida: {success: true, dados: {...}}
 
 4. **Teste com curl** (para verificar backend):
    ```bash
-   curl -X POST http://localhost:5000/api/health
+   curl http://localhost:5001/api/health
    ```
 
 ## Suporte Adicional

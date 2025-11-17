@@ -36,12 +36,39 @@ const UploadPage = ({ setDadosBoletim }) => {
 
     try {
       console.log('Enviando arquivo:', file.name, file.size, 'bytes');
+      console.log('Conectando em: http://localhost:5001/api/upload');
+      
+      // Testar conexão primeiro (com retry)
+      let healthCheckSuccess = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const healthCheck = await axios.get('http://localhost:5001/api/health', { 
+            timeout: 3000,
+            validateStatus: (status) => status < 500 // Aceita 200-499
+          });
+          console.log('✅ Servidor está respondendo:', healthCheck.data);
+          healthCheckSuccess = true;
+          break;
+        } catch (healthErr) {
+          if (attempt < 2) {
+            console.log(`⏳ Tentativa ${attempt + 1} falhou, tentando novamente...`);
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Aguarda 1s antes de tentar novamente
+          } else {
+            console.error('❌ Servidor não está respondendo após 3 tentativas:', healthErr.message);
+            throw new Error('Servidor não está acessível. Verifique se está rodando na porta 5001.');
+          }
+        }
+      }
+      
+      if (!healthCheckSuccess) {
+        throw new Error('Servidor não está acessível. Verifique se está rodando na porta 5001.');
+      }
       
       const response = await axios.post('http://localhost:5001/api/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 120000, // 2 minutos de timeout (OCR pode demorar)
+        timeout: 180000, // 3 minutos de timeout (OCR + LLM pode demorar)
       });
 
       console.log('Resposta recebida:', response.data);
@@ -54,17 +81,26 @@ const UploadPage = ({ setDadosBoletim }) => {
       }
     } catch (err) {
       console.error('Erro no upload:', err);
+      console.error('Detalhes do erro:', {
+        code: err.code,
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status
+      });
       
       let errorMessage = 'Erro ao processar a imagem.';
       
-      if (err.code === 'ECONNREFUSED' || err.message.includes('Network Error')) {
-        errorMessage = 'Erro de conexão! Verifique se o servidor backend está rodando na porta 5001.';
+      if (err.code === 'ECONNREFUSED' || err.message.includes('Network Error') || err.message.includes('ERR_CONNECTION_REFUSED')) {
+        errorMessage = 'Erro de conexão! Verifique se o servidor Python está rodando na porta 5001.';
+      } else if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
+        errorMessage = 'Timeout! O processamento está demorando muito. Tente novamente ou use uma imagem menor.';
       } else if (err.response) {
         // Erro da API
-        errorMessage = err.response.data?.error || `Erro ${err.response.status}: ${err.response.statusText}`;
+        const apiError = err.response.data?.detail || err.response.data?.error || err.response.data?.message;
+        errorMessage = apiError || `Erro ${err.response.status}: ${err.response.statusText}`;
       } else if (err.request) {
         // Requisição feita mas sem resposta
-        errorMessage = 'Servidor não respondeu. Verifique se o backend está rodando.';
+        errorMessage = 'Servidor não respondeu. Verifique se o backend está rodando e tente novamente.';
       } else {
         // Erro na configuração da requisição
         errorMessage = err.message || 'Erro desconhecido ao fazer upload.';
@@ -198,8 +234,9 @@ const UploadPage = ({ setDadosBoletim }) => {
                   <div className="mt-3 text-xs text-red-600">
                     <p className="font-semibold mb-1">Verifique:</p>
                     <ul className="list-disc list-inside space-y-1">
-                      <li>O servidor backend está rodando? Execute: <code className="bg-red-100 px-1 rounded">cd server && npm run dev</code></li>
-                      <li>A porta 5001 está livre?</li>
+                      <li>O servidor Python está rodando? Execute: <code className="bg-red-100 px-1 rounded">npm run dev</code> (na raiz do projeto)</li>
+                      <li>Verifique se o servidor Python iniciou corretamente (procure por "🚀 Iniciando servidor")</li>
+                      <li>A porta 5001 está livre? Verifique com: <code className="bg-red-100 px-1 rounded">lsof -ti:5001</code></li>
                       <li>Verifique o console do terminal do backend para mais detalhes</li>
                     </ul>
                   </div>

@@ -6,10 +6,8 @@
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "cd server_python && ./run.sh",
-    "server:node": "cd server && npx nodemon index.js",
     "client": "cd client && npm start",
-    "install-all": "npm install && cd client && npm install && npm run install:python",
-    "install:python": "cd ../server_python && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt",
+    "install-all": "npm install && cd client && npm install && npm run setup:python",
     "setup:python": "cd server_python && python3 -m venv venv && source venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt"
   },
   "keywords": ["boletim", "ocr", "educacao", "llamaindex", "ai"],
