@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import API_URL from '../config';
 import DisciplinaCard from './DisciplinaCard';
 import PainelGeral from './PainelGeral';
 import MediaConfig from './MediaConfig';
@@ -39,8 +40,8 @@ const Dashboard = ({ dadosBoletim, setDadosBoletim }) => {
     setMediaMinima(novaMedia);
     setLoading(true);
 
-    try {
-      const response = await axios.post('http://localhost:5001/api/calculate', {
+          try {
+            const response = await axios.post(`${API_URL}/api/calculate`, {
         disciplinas: dadosBoletim.disciplinas,
         mediaMinima: novaMedia
       });

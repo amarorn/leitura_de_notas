@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import API_URL from '../config';
 
 const DisciplinaCard = ({ disciplina, onUpdate, mediaMinima = 7.0 }) => {
   const pontosExtrasInicial = disciplina.pontosExtras || disciplina.pontos_extras || 0;
@@ -63,7 +64,7 @@ const DisciplinaCard = ({ disciplina, onUpdate, mediaMinima = 7.0 }) => {
         pontos_extras: pontos
       };
       
-      const response = await axios.post('http://localhost:5001/api/calculate', {
+            const response = await axios.post(`${API_URL}/api/calculate`, {
         disciplinas: [disciplinaAtualizada],
         mediaMinima: mediaMinima
       });

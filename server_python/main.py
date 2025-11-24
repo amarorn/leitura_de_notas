@@ -47,9 +47,15 @@ load_dotenv()
 app = FastAPI(title="Sistema de Análise de Boletim Escolar")
 
 # CORS
+# Permitir origens do frontend (desenvolvimento e produção)
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3000"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1267,6 +1273,7 @@ async def calculate_medias(data: dict):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 5001))
+    host = os.getenv("HOST", "0.0.0.0")
     print(f"\n🚀 Iniciando servidor na porta {port}...")
-    print(f"📡 API disponível em http://localhost:{port}\n")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    print(f"📡 API disponível em http://{host}:{port}\n")
+    uvicorn.run(app, host=host, port=port)

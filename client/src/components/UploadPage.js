@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import axios from 'axios';
+import API_URL from '../config';
 
 const UploadPage = ({ setDadosBoletim }) => {
   const [loading, setLoading] = useState(false);
@@ -36,13 +37,13 @@ const UploadPage = ({ setDadosBoletim }) => {
 
     try {
       console.log('Enviando arquivo:', file.name, file.size, 'bytes');
-      console.log('Conectando em: http://localhost:5001/api/upload');
+      console.log('Conectando em:', `${API_URL}/api/upload`);
       
       // Testar conexão primeiro (com retry)
       let healthCheckSuccess = false;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const healthCheck = await axios.get('http://localhost:5001/api/health', { 
+          const healthCheck = await axios.get(`${API_URL}/api/health`, { 
             timeout: 3000,
             validateStatus: (status) => status < 500 // Aceita 200-499
           });
@@ -64,7 +65,7 @@ const UploadPage = ({ setDadosBoletim }) => {
         throw new Error('Servidor não está acessível. Verifique se está rodando na porta 5001.');
       }
       
-      const response = await axios.post('http://localhost:5001/api/upload', formData, {
+          const response = await axios.post(`${API_URL}/api/upload`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },

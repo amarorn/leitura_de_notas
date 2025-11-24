@@ -47,6 +47,17 @@ server_python/__pycache__/
 *.pyd
 .Python
 
+# Environment variables
+.env
+.env.local
+.env.production
+client/.env
+client/.env.local
+client/.env.production
+server_python/.env
+server_python/.env.local
+server_python/.env.production
+
 # Database
 *.db
 *.sqlite

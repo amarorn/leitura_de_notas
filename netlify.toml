@@ -1,0 +1,11 @@
+[build]
+  base = "client"
+  command = "npm install && npm run build"
+  publish = "build"
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://seu-backend.railway.app/api/:splat"
+  status = 200
+  force = true
+
