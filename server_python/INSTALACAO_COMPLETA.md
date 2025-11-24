@@ -9,6 +9,7 @@
 - ✅ **LlamaIndex LLMs Ollama** 0.9.0
 - ✅ **PaddleOCR** 3.3.2
 - ✅ **Pytesseract** 0.3.13
+- ✅ **ollama-ocr** 0.1.6 (usa modelos de visão via Ollama)
 - ✅ **Uvicorn** 0.38.0
 - ✅ E todas as dependências necessárias
 
@@ -24,7 +25,10 @@ cat > .env << EOF
 PORT=5001
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-sua-chave-aqui
-OCR_ENGINE=paddleocr
+OCR_ENGINE=ollama-ocr
+OLLAMA_OCR_MODEL=llama3.2-vision:11b
+OLLAMA_BASE_URL=http://localhost:11434/api/generate
+OLLAMA_OCR_LANGUAGE=pt
 EOF
 ```
 
@@ -36,8 +40,10 @@ ollama pull llama3.2
 
 # No .env:
 LLM_PROVIDER=ollama
-OCR_ENGINE=paddleocr
+OCR_ENGINE=ollama-ocr
 ```
+
+> Para habilitar o OCR multimodal mantenha o `ollama serve` rodando e instale o cliente `ollama-ocr` (`pip install ollama-ocr`).
 
 ### 2. Testar o servidor
 
@@ -50,7 +56,7 @@ python main.py
 Você deve ver:
 ```
 ✅ Usando OpenAI GPT-4o-mini
-✅ OCR Engine: paddleocr
+✅ OCR Engine: ollama-ocr
 🚀 Iniciando servidor na porta 5001...
 📡 API disponível em http://localhost:5001
 ```
@@ -68,7 +74,7 @@ Deve retornar:
   "status": "OK",
   "message": "Servidor rodando",
   "llm_provider": "openai",
-  "ocr_engine": "paddleocr"
+  "ocr_engine": "ollama-ocr"
 }
 ```
 
@@ -103,6 +109,10 @@ lsof -ti:5001 | xargs kill
 ### PaddleOCR lento na primeira execução
 - Normal! Ele baixa modelos na primeira vez (~200MB)
 
+### Erro ao usar ollama-ocr
+- Instale `ollama-ocr` (`pip install ollama-ocr`)
+- Verifique se o Ollama está rodando (`ollama serve`) e se o modelo requisitado está carregado (`ollama list`)
+
 ### Ollama muito lento
 - Use OpenAI para melhor performance
 - Ou use modelo menor: `ollama pull llama3.1:8b`
@@ -116,4 +126,3 @@ lsof -ti:5001 | xargs kill
 ---
 
 **Tudo pronto!** 🎉 Agora você pode processar boletins com **LlamaIndex + AI**!
-

@@ -36,7 +36,7 @@ Deve retornar:
   "status": "OK",
   "message": "Servidor rodando",
   "llm_provider": "ollama",
-  "ocr_engine": "paddleocr"
+  "ocr_engine": "ollama-ocr"
 }
 ```
 
@@ -66,8 +66,13 @@ Configure no arquivo `server_python/.env`:
 PORT=5001
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-sua-chave-aqui
-OCR_ENGINE=paddleocr
+OCR_ENGINE=ollama-ocr            # ou "paddleocr" / "tesseract" para fallback
+OLLAMA_OCR_MODEL=llama3.2-vision:11b
+OLLAMA_BASE_URL=http://localhost:11434/api/generate
+OLLAMA_OCR_LANGUAGE=pt
 ```
+
+> Mesmo usando OpenAI como LLM, mantenha o `ollama serve` rodando e instale `ollama-ocr` (`pip install ollama-ocr`) para fazer o OCR localmente.
 
 ## 🐛 Problemas Comuns
 
@@ -88,4 +93,3 @@ cd server_python
 source venv/bin/activate
 pip install -r requirements.txt
 ```
-

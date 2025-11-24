@@ -15,6 +15,7 @@ llama-index-embeddings-huggingface>=0.1.0
 paddleocr>=2.7.3
 pytesseract>=0.3.13
 Pillow>=10.4.0
+ollama-ocr>=0.1.6
 
 # Utilitários
 python-dotenv>=1.0.1
@@ -22,5 +23,3 @@ pydantic>=2.9.2
 
 # Opcional: para melhor performance
 numpy>=1.26.4
-opencv-python-headless>=4.10.0.84
-

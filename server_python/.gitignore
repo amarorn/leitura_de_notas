@@ -7,6 +7,9 @@ ENV/
 uploads/*
 !uploads/.gitkeep
 
+# Resumos JSON salvos
+summaries/*
+
 # Arquivos de ambiente
 .env
 .env.local
@@ -29,4 +32,3 @@ build/
 
 # Logs
 *.log
-

@@ -4,16 +4,19 @@ Servidor FastAPI com LlamaIndex + OCR para processamento de boletins escolares
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, Settings, Document
-from llama_index.readers.file import ImageReader
+from llama_index.core import VectorStoreIndex, Settings, Document
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.ollama import Ollama
+from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from collections import defaultdict
+from datetime import datetime
 import os
+import re
 import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional
 import json
 import unicodedata
 from dotenv import load_dotenv
@@ -32,6 +35,13 @@ try:
 except ImportError:
     TESSERACT_AVAILABLE = False
 
+try:
+    from ollama_ocr import OCRProcessor
+    OLLAMA_OCR_AVAILABLE = True
+except ImportError:
+    OCRProcessor = None
+    OLLAMA_OCR_AVAILABLE = False
+
 load_dotenv()
 
 app = FastAPI(title="Sistema de Análise de Boletim Escolar")
@@ -48,6 +58,8 @@ app.add_middleware(
 # Configurações
 UPLOAD_DIR = Path(__file__).parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
+SUMMARY_OUTPUT_DIR = Path(__file__).parent / "summaries"
+SUMMARY_OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Configurar LLM (OpenAI ou Ollama local)
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")  # "openai" ou "ollama"
@@ -62,27 +74,72 @@ if LLM_PROVIDER == "openai":
         LLM_PROVIDER = "ollama"
     else:
         Settings.llm = OpenAI(api_key=api_key, model="gpt-4o-mini", temperature=0)
-        print("✅ Usando OpenAI GPT-4o-mini")
+        # Configurar embeddings (tentar modelos mais recentes primeiro)
+        embed_configured = False
+        try:
+            Settings.embed_model = OpenAIEmbedding(
+                api_key=api_key,
+                model="text-embedding-3-small"
+            )
+            print("✅ Usando OpenAI GPT-4o-mini com embeddings text-embedding-3-small")
+            embed_configured = True
+        except Exception as e:
+            print(f"⚠️  Erro ao configurar embeddings text-embedding-3-small: {e}")
+            print("🔄 Tentando com modelo alternativo...")
+            try:
+                Settings.embed_model = OpenAIEmbedding(
+                    api_key=api_key,
+                    model="text-embedding-ada-002"
+                )
+                print("✅ Usando OpenAI GPT-4o-mini com embeddings text-embedding-ada-002")
+                embed_configured = True
+            except Exception as e2:
+                print(f"⚠️  Erro ao configurar embeddings text-embedding-ada-002: {e2}")
+                print("🔄 Usando embeddings locais (HuggingFace) como fallback...")
+                try:
+                    Settings.embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+                    print("✅ Usando embeddings locais (HuggingFace)")
+                    embed_configured = True
+                except Exception as e3:
+                    print(f"⚠️  Erro ao configurar embeddings locais: {e3}")
+                    print("💡 Continuando sem embeddings customizados (LlamaIndex usará padrão)")
+                    embed_configured = False
 if LLM_PROVIDER == "ollama":
     try:
+        # Obter modelo do .env ou usar padrão (gemma3:4b é menor e mais rápido)
+        ollama_model = os.getenv("OLLAMA_MODEL", "gemma3:4b")
         # Timeout aumentado para 300 segundos (5 minutos) para processar textos grandes
-        Settings.llm = Ollama(model="llama3.2", request_timeout=300.0)
+        Settings.llm = Ollama(model=ollama_model, request_timeout=300.0)
         # Ollama não precisa de embeddings separados, usa os do modelo
-        print("✅ Usando Ollama (llama3.2)")
+        print(f"✅ Usando Ollama ({ollama_model})")
         print("💡 Certifique-se de que o Ollama está rodando: ollama serve")
         print("⏱️  Timeout configurado: 300 segundos")
     except Exception as e:
-        print(f"❌ Erro ao configurar Ollama: {e}")
-        print("💡 Instale o Ollama: brew install ollama")
-        print("💡 Ou configure uma chave OpenAI válida no arquivo .env")
+        error_msg = str(e)
+        if "not found" in error_msg.lower() or "404" in error_msg:
+            print(f"❌ Modelo '{ollama_model}' não encontrado no Ollama")
+            print(f"💡 Baixe o modelo com: ollama pull {ollama_model}")
+            print("💡 Ou configure outro modelo no arquivo .env: OLLAMA_MODEL=gemma3:4b")
+            print("💡 Modelos disponíveis: gemma3:4b (menor, mais rápido) ou llama3.2 (maior, mais preciso)")
+        else:
+            print(f"❌ Erro ao configurar Ollama: {e}")
+            print("💡 Instale o Ollama: brew install ollama")
+            print("💡 Ou configure uma chave OpenAI válida no arquivo .env")
         raise
 
-# OCR Engine (paddleocr ou tesseract)
-OCR_ENGINE = os.getenv("OCR_ENGINE", "paddleocr")  # "paddleocr" ou "tesseract"
+# OCR Engine (ollama-ocr, paddleocr ou tesseract)
+OCR_ENGINE = os.getenv("OCR_ENGINE", "ollama-ocr")  # "ollama-ocr", "paddleocr" ou "tesseract"
+OLLAMA_OCR_MODEL = os.getenv("OLLAMA_OCR_MODEL", "llama3.2-vision:11b")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/api/generate")
+OLLAMA_OCR_LANGUAGE = os.getenv("OLLAMA_OCR_LANGUAGE", "pt")
 print(f"✅ OCR Engine: {OCR_ENGINE}")
+print(f"   - Ollama OCR: modelo={OLLAMA_OCR_MODEL} base_url={OLLAMA_BASE_URL}")
 
 # Inicializar PaddleOCR de forma lazy (só quando necessário)
 _paddleocr_instance = None
+# Inicializar Ollama OCR
+_ollama_ocr_processor = None
+BIMESTRE_LABELS = ["1º Bimestre", "2º Bimestre", "3º Bimestre", "4º Bimestre"]
 
 def get_paddleocr_instance():
     """Inicializa PaddleOCR de forma lazy"""
@@ -96,6 +153,205 @@ def get_paddleocr_instance():
             print(f"❌ Erro ao inicializar PaddleOCR: {e}")
             raise
     return _paddleocr_instance
+
+
+def get_ollama_ocr_processor():
+    """Inicializa o OCRProcessor do ollama-ocr"""
+    global _ollama_ocr_processor
+    if _ollama_ocr_processor is None:
+        if not OLLAMA_OCR_AVAILABLE or OCRProcessor is None:
+            raise RuntimeError("Instale o pacote ollama-ocr (pip install ollama-ocr) para usar esse OCR.")
+        print(f"🔄 Inicializando ollama-ocr (modelo={OLLAMA_OCR_MODEL})...")
+        _ollama_ocr_processor = OCRProcessor(model_name=OLLAMA_OCR_MODEL, base_url=OLLAMA_BASE_URL)
+        print("✅ ollama-ocr inicializado")
+    return _ollama_ocr_processor
+
+
+def _remove_page_headers(text: str) -> str:
+    """Remove cabeçalhos como 'Page 1:' que o ollama-ocr pode inserir em PDFs."""
+    pattern = re.compile(r"^Page\s+\d+\s*:$", re.IGNORECASE)
+    cleaned_lines = [line for line in text.splitlines() if not pattern.match(line.strip())]
+    return "\n".join(cleaned_lines).strip() if cleaned_lines else text.strip()
+
+
+def extract_text_with_ollamaocr(image_path: str) -> str:
+    """Extrai texto da imagem usando o pipeline ollama-ocr."""
+    try:
+        processor = get_ollama_ocr_processor()
+        print(f"🔍 Extraindo texto com ollama-ocr ({OLLAMA_OCR_MODEL})...")
+        raw_text = processor.process_image(
+            image_path,
+            format_type="text",
+            preprocess=True,
+            custom_prompt=None,
+            language=OLLAMA_OCR_LANGUAGE
+        )
+
+        if not raw_text:
+            raise ValueError("Resposta vazia do ollama-ocr.")
+
+        if raw_text.lower().startswith("error processing image:"):
+            raise ValueError(raw_text)
+
+        cleaned = _remove_page_headers(raw_text)
+        cleaned_text = cleaned if cleaned else raw_text.strip()
+        print(f"✅ OCR (ollama-ocr) concluído: {len(cleaned_text)} caracteres")
+        return cleaned_text
+    except HTTPException:
+        raise
+    except Exception as exc:
+        detail = (
+            f"Erro ao extrair texto com ollama-ocr: {exc}. "
+            f"Verifique se o Ollama está rodando (`ollama serve`) e se o modelo {OLLAMA_OCR_MODEL} foi baixado (`ollama list`)."
+        )
+        print(f"❌ {detail}")
+        raise HTTPException(status_code=500, detail=detail)
+
+
+def normalize_subject_name(name: str) -> str:
+    """Normaliza o nome da disciplina para agrupamentos."""
+    normalized = unicodedata.normalize("NFD", name or "")
+    normalized = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
+    return " ".join(normalized.lower().split())
+
+
+def extract_bimestre_label(disciplina: dict, extracted_data: dict) -> str:
+    """Tenta recuperar o nome do bimestre para aquela disciplina."""
+    for key in ("bimestre", "bimestre_descricao", "periodo", "bimestreNome"):
+        label = disciplina.get(key)
+        if isinstance(label, str) and label.strip():
+            return label.strip()
+    fallback = extracted_data.get("bimestre")
+    if isinstance(fallback, str) and fallback.strip():
+        return fallback.strip()
+    return "1º Bimestre"
+
+
+def build_notas_structure(notas: list) -> dict:
+    """Garante que existam 3 entradas (médias parciais dos 1º, 2º e 3º bimestres) e retorna um dict legível."""
+    if not isinstance(notas, list):
+        notas = []
+    cleaned = []
+    for valor in notas[:3]:  # Apenas 3 avaliações
+        if isinstance(valor, (int, float)):
+            cleaned.append(round(valor, 2))
+        else:
+            cleaned.append(None)
+    while len(cleaned) < 3:
+        cleaned.append(None)
+    return {
+        "1a_av": cleaned[0],
+        "2a_av": cleaned[1],
+        "3a_av": cleaned[2],
+    }
+
+
+def build_subject_summary(extracted_data: dict, disciplinas: list) -> dict:
+    """Constrói o JSON com notas detalhadas e médias parciais por bimestre."""
+    grouped = defaultdict(list)
+    for disciplina in disciplinas:
+        nome = disciplina.get("nome", "").strip()
+        if not nome:
+            continue
+        key = normalize_subject_name(nome)
+        grouped[key].append(disciplina)
+
+    materias_summary = []
+    for entries in grouped.values():
+        base = entries[0]
+        notas = build_notas_structure(base.get("notas", []))
+        
+        # Extrair médias bimestrais do campo medias_bimestrais se disponível
+        medias_bimestrais_dict = base.get("medias_bimestrais", {})
+        notas_array = base.get("notas", [])
+        
+        # Se medias_bimestrais existe e é um dicionário válido com valores
+        if isinstance(medias_bimestrais_dict, dict) and medias_bimestrais_dict:
+            # Verificar se tem valores válidos (não apenas chaves vazias)
+            tem_valores_validos = any(v is not None for v in medias_bimestrais_dict.values())
+            if tem_valores_validos:
+                # Normalizar chaves do dicionário medias_bimestrais
+                medias_normalizadas = {}
+                for label in BIMESTRE_LABELS:
+                    # Tentar diferentes variações de chave para encontrar o valor
+                    valor_encontrado = None
+                    # Variações possíveis: "1º Bimestre", "1º Bim.", "1º Bimestre", etc.
+                    variacoes = [
+                        label,
+                        label.replace("º Bimestre", "º Bim."),
+                        label.replace("º Bimestre", "º Bimestre"),
+                        label.replace("º", "o"),
+                        f"{label.split()[0]}º Bim.",
+                        f"{label.split()[0]}º Bimestre"
+                    ]
+                    for key_variation in variacoes:
+                        if key_variation in medias_bimestrais_dict:
+                            valor_encontrado = medias_bimestrais_dict[key_variation]
+                            break
+                    medias_normalizadas[label] = valor_encontrado
+                medias_bimestrais_dict = medias_normalizadas
+            else:
+                # Se medias_bimestrais existe mas está vazio, usar fallback
+                medias_bimestrais_dict = {}
+        
+        # Se não tiver medias_bimestrais válido, deixar vazio (não usar fallback das notas)
+        # As médias bimestrais devem vir apenas das colunas "1º Bim.", "2º Bim.", "3º Bim.", "4º Bim."
+        if not medias_bimestrais_dict or not any(v is not None for v in medias_bimestrais_dict.values()):
+            medias_bimestrais_dict = {
+                "1º Bimestre": None,
+                "2º Bimestre": None,
+                "3º Bimestre": None,
+                "4º Bimestre": None
+            }
+
+        bimestral_list = []
+        for label in BIMESTRE_LABELS:
+            valor = medias_bimestrais_dict.get(label) if isinstance(medias_bimestrais_dict, dict) else None
+            # Se for número, garantir que está na escala 0-10
+            if isinstance(valor, (int, float)):
+                if valor > 10 and valor <= 100:
+                    valor = valor / 10
+                valor = round(valor, 2) if 0 <= valor <= 10 else None
+            bimestral_list.append({
+                "bimestre": label,
+                "mediaParcial": valor
+            })
+
+        # Calcular nota necessária e status se não estiverem presentes
+        media_minima = base.get("media_minima", 7.0)
+        if "nota_necessaria" not in base or "status" not in base:
+            calc_result = calculate_averages(base, media_minima)
+            base.update(calc_result)
+        
+        materias_summary.append({
+            "nome": base.get("nome"),
+            "notas": notas,
+            "mediaProvisoria": base.get("media_provisoria"),
+            "pontosExtras": base.get("pontos_extras"),
+            "mediaParcial": base.get("media_parcial"),
+            "notaNecessaria": base.get("nota_necessaria"),
+            "status": base.get("status"),
+            "mediasParciaisBimestrais": bimestral_list
+        })
+
+    summary = {
+        "aluno": extracted_data.get("aluno"),
+        "matricula": extracted_data.get("matricula"),
+        "turma": extracted_data.get("turma"),
+        "ano": extracted_data.get("ano"),
+        "bimestre": extracted_data.get("bimestre"),
+        "timestamp": datetime.utcnow().isoformat(),
+        "materias": materias_summary
+    }
+    return summary
+
+
+def save_summary_json(summary: dict) -> Path:
+    """Salva o resumo em um arquivo JSON com timestamp."""
+    filename = SUMMARY_OUTPUT_DIR / f"summary-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}.json"
+    with open(filename, "w", encoding="utf-8") as fp:
+        json.dump(summary, fp, ensure_ascii=False, indent=2)
+    return filename
 
 
 def validate_and_sanitize_data(data: dict) -> dict:
@@ -163,7 +419,7 @@ def validate_and_sanitize_data(data: dict) -> dict:
             notas = []
         
         notas_validas = []
-        for nota in notas[:3]:  # Máximo 3 notas
+        for nota in notas[:4]:  # Máximo 4 notas
             if isinstance(nota, (int, float)):
                 # Validar se a nota está em escala 0-10 ou 0-100
                 if 0 <= nota <= 10:
@@ -182,8 +438,8 @@ def validate_and_sanitize_data(data: dict) -> dict:
             else:
                 notas_validas.append(None)
         
-        # Garantir que temos exatamente 3 notas
-        while len(notas_validas) < 3:
+        # Garantir que temos exatamente 4 notas
+        while len(notas_validas) < 4:
             notas_validas.append(None)
         
         # Validar e sanitizar média provisória
@@ -247,6 +503,27 @@ def validate_and_sanitize_data(data: dict) -> dict:
         if media_parcial is not None:
             disciplina_sanitizada["media_parcial"] = media_parcial
         
+        # Preservar médias bimestrais se existirem
+        medias_bimestrais = disciplina.get("medias_bimestrais")
+        if isinstance(medias_bimestrais, dict):
+            # Validar e sanitizar valores das médias bimestrais
+            medias_bimestrais_sanitizadas = {}
+            for key, valor in medias_bimestrais.items():
+                if isinstance(valor, (int, float)):
+                    # Garantir que está na escala 0-10
+                    if 0 <= valor <= 10:
+                        medias_bimestrais_sanitizadas[key] = round(valor, 2)
+                    elif 10 < valor <= 100:
+                        # Converter de 0-100 para 0-10
+                        valor_convertido = valor / 10
+                        if 0 <= valor_convertido <= 10:
+                            medias_bimestrais_sanitizadas[key] = round(valor_convertido, 2)
+                    # Se valor inválido, não adicionar
+                elif valor is None:
+                    medias_bimestrais_sanitizadas[key] = None
+            if medias_bimestrais_sanitizadas:
+                disciplina_sanitizada["medias_bimestrais"] = medias_bimestrais_sanitizadas
+        
         disciplinas_validas.append(disciplina_sanitizada)
         disciplinas_nomes[nome_normalizado] = disciplina_sanitizada
     
@@ -261,7 +538,18 @@ def calculate_averages(disciplina: dict, media_minima: float = 7.0) -> dict:
     notas = [n for n in disciplina.get("notas", []) if n is not None]
     qtd_notas = len(notas)
     
-    # Média provisória
+    # Extrair médias bimestrais
+    medias_bimestrais = disciplina.get("medias_bimestrais", {})
+    medias_bimestrais_valores = []
+    
+    if isinstance(medias_bimestrais, dict):
+        # Extrair valores dos 4 bimestres
+        for label in BIMESTRE_LABELS:
+            valor = medias_bimestrais.get(label) or medias_bimestrais.get(label.replace("º", "o"))
+            if valor is not None and isinstance(valor, (int, float)) and 0 <= valor <= 10:
+                medias_bimestrais_valores.append(valor)
+    
+    # Média provisória (das notas das avaliações, se disponível)
     media_provisoria = disciplina.get("media_provisoria")
     if media_provisoria is None and qtd_notas > 0:
         media_provisoria = sum(notas) / qtd_notas
@@ -269,34 +557,78 @@ def calculate_averages(disciplina: dict, media_minima: float = 7.0) -> dict:
     # Pontos extras
     pontos_extras = disciplina.get("pontos_extras", 0) or 0
     
-    # Média parcial (com pontos extras, limitada a 10)
+    # Média parcial: calcular a partir das médias bimestrais disponíveis
     media_parcial = disciplina.get("media_parcial")
     if media_parcial is None:
-        media_parcial = min((media_provisoria or 0) + pontos_extras, 10)
+        if medias_bimestrais_valores:
+            # Calcular média das médias bimestrais disponíveis
+            media_parcial = sum(medias_bimestrais_valores) / len(medias_bimestrais_valores)
+            # Adicionar pontos extras e limitar a 10
+            media_parcial = min(media_parcial + pontos_extras, 10)
+        elif media_provisoria is not None:
+            # Fallback: usar média provisória + pontos extras
+            media_parcial = min((media_provisoria or 0) + pontos_extras, 10)
+        else:
+            media_parcial = 0
     
     # Status e nota necessária
-    todas_notas_lancadas = qtd_notas >= 3 and all(n is not None for n in disciplina.get("notas", [])[:3])
+    # Considerando 3 avaliações (1ª AV, 2ª AV, 3ª AV)
+    NUM_AVALIACOES = 3
+    todas_notas_lancadas = qtd_notas >= NUM_AVALIACOES and all(n is not None for n in disciplina.get("notas", [])[:NUM_AVALIACOES])
     
     nota_necessaria = None
+    
+    # Calcular nota necessária quando faltam avaliações
     if not todas_notas_lancadas and qtd_notas > 0:
-        faltam_notas = 3 - qtd_notas
+        faltam_notas = NUM_AVALIACOES - qtd_notas
         soma_atual = sum(notas) + pontos_extras
-        total_necessario = media_minima * 3
+        total_necessario = media_minima * NUM_AVALIACOES
         nota_faltante = (total_necessario - soma_atual) / faltam_notas if faltam_notas > 0 else 0
         
-        if 0 < nota_faltante <= 10:
+        if nota_faltante > 0:
             nota_necessaria = round(nota_faltante, 2)
+    
+    # Calcular nota necessária quando está em recuperação (independente de ter todas as notas)
+    # Na recuperação, a média final é calculada como: (média parcial + nota recuperação) / 2
+    # Para passar: (media_parcial + nota_recuperacao) / 2 >= media_minima
+    # nota_recuperacao >= (media_minima * 2) - media_parcial
+    if media_parcial < media_minima:
+        nota_recuperacao_necessaria = (media_minima * 2) - media_parcial
+        
+        if nota_recuperacao_necessaria > 0 and nota_recuperacao_necessaria <= 10:
+            nota_necessaria = round(nota_recuperacao_necessaria, 2)
+        elif nota_recuperacao_necessaria > 10:
+            # Mesmo tirando 10 na recuperação não passa
+            nota_necessaria = 10.01  # Indica que não é possível passar
+        elif nota_recuperacao_necessaria <= 0:
+            # Já passou (não deveria acontecer se media_parcial < media_minima)
+            nota_necessaria = None
     
     # Status
     if qtd_notas == 0:
         status = "Sem Notas"
-        nota_necessaria = media_minima
+        if nota_necessaria is None:
+            nota_necessaria = media_minima
     elif media_parcial >= media_minima:
         status = "Aprovado"
     elif media_parcial >= media_minima * 0.6:
         status = "Em Recuperação"
+        # Se está em recuperação e ainda não calculou a nota necessária, calcular agora
+        if nota_necessaria is None:
+            nota_recuperacao_necessaria = (media_minima * 2) - media_parcial
+            if nota_recuperacao_necessaria > 0 and nota_recuperacao_necessaria <= 10:
+                nota_necessaria = round(nota_recuperacao_necessaria, 2)
+            elif nota_recuperacao_necessaria > 10:
+                nota_necessaria = 10.01
     else:
         status = "Reprovado"
+        # Se está reprovado, também calcular nota necessária na recuperação
+        if nota_necessaria is None:
+            nota_recuperacao_necessaria = (media_minima * 2) - media_parcial
+            if nota_recuperacao_necessaria > 0 and nota_recuperacao_necessaria <= 10:
+                nota_necessaria = round(nota_recuperacao_necessaria, 2)
+            elif nota_recuperacao_necessaria > 10:
+                nota_necessaria = 10.01
     
     return {
         "media_provisoria": round(media_provisoria or 0, 2),
@@ -313,6 +645,9 @@ def extract_text_with_ocr(image_path: str) -> str:
     Extrai texto da imagem usando OCR (PaddleOCR ou Tesseract)
     """
     print(f"🔍 Iniciando OCR com {OCR_ENGINE}...")
+    
+    if OCR_ENGINE == "ollama-ocr":
+        return extract_text_with_ollamaocr(image_path)
     
     if OCR_ENGINE == "paddleocr":
         if not PADDLEOCR_AVAILABLE:
@@ -409,33 +744,91 @@ def extract_boletim_data_with_llamaindex(image_path: str) -> dict:
     extraction_prompt = """
 Você é um especialista em análise de boletins escolares. Extraia TODOS os dados do boletim e retorne APENAS um JSON válido, sem texto adicional.
 
-Estrutura esperada do JSON:
+⚠️ ATENÇÃO CRÍTICA: O boletim tem colunas DISTINTAS e você NÃO deve confundi-las:
+
+COLUNAS DO BOLETIM (na ordem que aparecem):
+1. "Disciplina" - Nome da matéria
+2. "Faltas" - Número de faltas
+3. "1ª AV" - MÉDIA PARCIAL DO 1º BIMESTRE (extraia este valor - é a média parcial do 1º bimestre!)
+4. "2ª AV" - MÉDIA PARCIAL DO 2º BIMESTRE (extraia este valor - é a média parcial do 2º bimestre!)
+5. "3ª AV" - MÉDIA PARCIAL DO 3º BIMESTRE (extraia este valor - é a média parcial do 3º bimestre, pode ser "-" ou vazio)
+6. "Média Provisória" - Média calculada das avaliações do bimestre atual
+7. "Pontos Extras" - Pontos extras adicionados
+8. "Média Parcial" - MÉDIA PARCIAL DO BIMESTRE ATUAL (extraia este valor)
+9. "1º Bim." - MÉDIA PARCIAL DO 1º BIMESTRE (mesmo valor da coluna "1ª AV")
+10. "2º Bim." - MÉDIA PARCIAL DO 2º BIMESTRE (mesmo valor da coluna "2ª AV")
+11. "3º Bim." - MÉDIA PARCIAL DO 3º BIMESTRE (mesmo valor da coluna "3ª AV")
+12. "4º Bim." - MÉDIA PARCIAL DO 4º BIMESTRE (pode ser "-" ou vazio)
+
+EXEMPLO REAL - EMPREENDEDORISMO:
+Se no boletim você vê:
+- 1ª AV: 8,0  (esta é a MÉDIA PARCIAL do 1º Bimestre)
+- 2ª AV: 8,0  (esta é a MÉDIA PARCIAL do 2º Bimestre)
+- 3ª AV: - (traço ou vazio - esta seria a MÉDIA PARCIAL do 3º Bimestre, mas ainda não tem)
+- Média Parcial: 9,0  (média parcial do bimestre atual - 3º Bimestre)
+- 1º Bim.: 8,0  (mesmo valor da coluna "1ª AV")
+- 2º Bim.: 8,1  (mesmo valor da coluna "2ª AV")
+- 3º Bim.: 9,0  (mesmo valor da coluna "Média Parcial" do bimestre atual)
+- 4º Bim.: - (traço ou vazio)
+
+Então o JSON deve ser:
+{
+  "nome": "EMPREENDEDORISMO",
+  "faltas": 0,
+  "notas": [8.0, 8.0, null],  // ← Valores das colunas 1ª AV, 2ª AV, 3ª AV (são médias bimestrais!)
+  "pontos_extras": 1.0,
+  "media_provisoria": 8.0,
+  "media_parcial": 9.0,  // ← Valor da coluna "Média Parcial" (bimestre atual)
+  "medias_bimestrais": {
+    "1º Bimestre": 8.0,  // ← Valor da coluna "1ª AV" ou "1º Bim."
+    "2º Bimestre": 8.1,  // ← Valor da coluna "2ª AV" ou "2º Bim."
+    "3º Bimestre": 9.0,  // ← Valor da coluna "Média Parcial" (bimestre atual) ou "3º Bim."
+    "4º Bimestre": null  // ← Valor da coluna "4º Bim." (é "-" então null)
+  }
+}
+
+Estrutura completa do JSON:
 {
   "aluno": "NOME COMPLETO DO ALUNO",
   "matricula": "NÚMERO DA MATRÍCULA",
-  "turma": "CÓDIGO DA TURMA (ex: 7A, 7B)",
-  "ano": 2024,
-  "bimestre": "1º Bimestre" ou "2º Bimestre" etc,
+  "turma": "CÓDIGO DA TURMA (ex: 7AMB-2025)",
+  "ano": 2025,
+  "bimestre": "1º Bimestre" ou "2º Bimestre" ou "3º Bimestre" ou "4º Bimestre",
   "disciplinas": [
     {
-      "nome": "NOME DA DISCIPLINA (exatamente como aparece)",
+      "nome": "NOME DA DISCIPLINA (exatamente como aparece, ex: EMPREENDEDORISMO)",
       "faltas": 0,
-      "notas": [10.0, 9.5, null],  // Array com 3 notas (1ª AV, 2ª AV, 3ª AV), use null se não houver
-      "pontos_extras": 0,
-      "media_provisoria": 9.75,  // Se disponível no boletim
-      "media_parcial": 10.0      // Se disponível no boletim
+      "notas": [8.0, 8.0, null],  // EXATAMENTE 3 valores: [1ª AV, 2ª AV, 3ª AV]
+      "pontos_extras": 1.0,  // Valor da coluna "Pontos Extras"
+      "media_provisoria": 8.0,  // Valor da coluna "Média Provisória"
+      "media_parcial": 9.0,  // Valor da coluna "Média Parcial" (NÃO confundir com médias bimestrais!)
+      "medias_bimestrais": {
+        "1º Bimestre": 8.0,  // Valor da coluna "1º Bim."
+        "2º Bimestre": 8.1,  // Valor da coluna "2º Bim."
+        "3º Bimestre": 9.0,  // Valor da coluna "3º Bim."
+        "4º Bimestre": null  // Valor da coluna "4º Bim." (null se for "-" ou vazio)
+      }
     }
   ]
 }
 
-REGRAS IMPORTANTES:
-1. Extraia TODAS as disciplinas encontradas no boletim (pode variar de 13 a 25+ dependendo da série)
-2. As notas devem ser números decimais ou null se não houver nota
-3. Mantenha os nomes das disciplinas EXATAMENTE como aparecem (com acentos e maiúsculas)
-4. Se houver subtabelas (ex: Biologia I / Biologia II, Física I / Física II, Literatura / Análise Linguística / Produção de Texto), trate cada uma como uma disciplina separada com seu nome completo
-5. Valores vazios ou traços (-) devem ser null
-6. Retorne APENAS o JSON, sem markdown, sem explicações, sem ```json
-7. Para faltas, use 0 se não houver faltas ou o número exato de faltas
+REGRAS CRÍTICAS DE EXTRAÇÃO:
+1. MÉDIAS BIMESTRAIS - USE APENAS AS COLUNAS "1º Bim.", "2º Bim.", "3º Bim.", "4º Bim.":
+   - EXTRAIA APENAS os valores das colunas "1º Bim.", "2º Bim.", "3º Bim.", "4º Bim."
+   - NÃO use as colunas "1ª AV", "2ª AV", "3ª AV" para médias bimestrais
+   - Campo "medias_bimestrais" deve ter:
+     * "1º Bimestre" = valor da coluna "1º Bim."
+     * "2º Bimestre" = valor da coluna "2º Bim."
+     * "3º Bimestre" = valor da coluna "3º Bim."
+     * "4º Bimestre" = valor da coluna "4º Bim." (pode ser null se for "-" ou vazio)
+2. MÉDIA PARCIAL: Será calculada automaticamente como média das médias bimestrais disponíveis + pontos extras
+3. NOTAS (campo "notas"): Use os valores das colunas "1ª AV", "2ª AV", "3ª AV" apenas para referência (não são usadas no cálculo da média parcial)
+4. IMPORTANTE: A média parcial será calculada como: média das médias bimestrais (1º, 2º, 3º, 4º Bim) + pontos extras
+5. Traços "-" ou células vazias = null
+6. Use vírgula como separador decimal (8,0 → 8.0 no JSON)
+7. Extraia TODAS as disciplinas encontradas
+8. Mantenha nomes EXATAMENTE como aparecem (maiúsculas, acentos)
+9. Retorne APENAS o JSON válido, sem markdown, sem ```json, sem explicações
 
 Disciplinas comuns (podem variar por série):
 - EMPREENDEDORISMO
@@ -581,6 +974,15 @@ Extraia todos os dados visíveis no boletim e retorne o JSON completo.
             # Para OpenAI, usar VectorStoreIndex (precisa de embeddings)
             print("🤖 Processando com OpenAI (usando VectorStoreIndex)...")
             try:
+                # Verificar se embeddings estão configurados
+                if not hasattr(Settings, 'embed_model') or Settings.embed_model is None:
+                    print("⚠️  Embeddings não configurados, usando HuggingFace local...")
+                    try:
+                        Settings.embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+                        print("✅ Embeddings locais configurados")
+                    except Exception as e_embed:
+                        print(f"⚠️  Erro ao configurar embeddings locais: {e_embed}")
+                
                 # Criar índice vetorial
                 index = VectorStoreIndex.from_documents(docs)
                 query_engine = index.as_query_engine()
@@ -589,7 +991,24 @@ Extraia todos os dados visíveis no boletim e retorne o JSON completo.
             except Exception as e:
                 error_msg = str(e)
                 print(f"❌ Erro ao processar com OpenAI: {error_msg}")
-                raise
+                # Se for erro de modelo de embeddings, tentar usar embeddings locais
+                if "model_not_found" in error_msg.lower() or "does not have access" in error_msg.lower() or "403" in error_msg or "text-embedding" in error_msg.lower():
+                    print("⚠️  Modelo de embeddings não disponível, tentando usar embeddings locais...")
+                    try:
+                        Settings.embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+                        print("✅ Usando embeddings locais (HuggingFace) como fallback")
+                        # Tentar novamente com embeddings locais
+                        index = VectorStoreIndex.from_documents(docs)
+                        query_engine = index.as_query_engine()
+                        response = query_engine.query(extraction_prompt)
+                        response_text = str(response)
+                    except Exception as e2:
+                        raise HTTPException(
+                            status_code=403,
+                            detail=f"Modelo de embeddings não disponível e fallback local falhou. Erro: {str(e2)}"
+                        )
+                else:
+                    raise
         
         # Parsear resposta JSON (response_text já foi definido acima)
         response_text = response_text.strip()
@@ -766,6 +1185,21 @@ async def upload_boletim(boletim: UploadFile = File(..., alias="boletim")):
         # Processar disciplinas (calcular médias)
         disciplinas_processadas = []
         for disciplina in extracted_data.get("disciplinas", []):
+            # Calcular média parcial a partir das médias bimestrais se disponível
+            medias_bimestrais = disciplina.get("medias_bimestrais", {})
+            if isinstance(medias_bimestrais, dict):
+                medias_bimestrais_valores = []
+                for label in BIMESTRE_LABELS:
+                    valor = medias_bimestrais.get(label) or medias_bimestrais.get(label.replace("º", "o"))
+                    if valor is not None and isinstance(valor, (int, float)) and 0 <= valor <= 10:
+                        medias_bimestrais_valores.append(valor)
+                
+                if medias_bimestrais_valores:
+                    pontos_extras = disciplina.get("pontos_extras", 0) or 0
+                    media_parcial_calculada = sum(medias_bimestrais_valores) / len(medias_bimestrais_valores)
+                    media_parcial_calculada = min(media_parcial_calculada + pontos_extras, 10)
+                    disciplina["media_parcial"] = round(media_parcial_calculada, 2)
+            
             calculos = calculate_averages(disciplina, 7.0)
             disciplina_completa = {
                 **disciplina,
@@ -775,13 +1209,23 @@ async def upload_boletim(boletim: UploadFile = File(..., alias="boletim")):
         
         # Atualizar dados extraídos
         extracted_data["disciplinas"] = disciplinas_processadas
+
+        # Gerar resumo JSON das disciplinas e salvar para consulta posterior
+        summary_payload = build_subject_summary(extracted_data, disciplinas_processadas)
+        summary_path = save_summary_json(summary_payload)
+        try:
+            summary_rel_path = summary_path.relative_to(Path(__file__).parent)
+        except ValueError:
+            summary_rel_path = summary_path
         
         # Limpar arquivo temporário
         temp_file.unlink()
         
         return JSONResponse({
             "success": True,
-            "dados": extracted_data
+            "dados": extracted_data,
+            "resumoMaterias": summary_payload,
+            "resumoArquivo": str(summary_rel_path)
         })
         
     except HTTPException:
@@ -826,4 +1270,3 @@ if __name__ == "__main__":
     print(f"\n🚀 Iniciando servidor na porta {port}...")
     print(f"📡 API disponível em http://localhost:{port}\n")
     uvicorn.run(app, host="0.0.0.0", port=port)
-

@@ -104,7 +104,7 @@ Você deve ver:
   "status": "OK",
   "message": "Servidor rodando",
   "llm_provider": "openai" ou "ollama",
-  "ocr_engine": "paddleocr"
+  "ocr_engine": "ollama-ocr"
 }
 ```
 
@@ -124,3 +124,7 @@ Você deve ver:
 ### Erro: "Model not found"
 - Baixe o modelo: `ollama pull llama3.2`
 
+### Erro: "Erro ao usar ollama-ocr"
+- Instale o cliente `ollama-ocr` (`pip install ollama-ocr`)
+- Certifique-se de que `ollama serve` está ativo
+- Verifique se o modelo apontado em `OLLAMA_OCR_MODEL` aparece em `ollama list`

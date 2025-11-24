@@ -9,6 +9,15 @@ const Dashboard = ({ dadosBoletim, setDadosBoletim }) => {
   const [mediaMinima, setMediaMinima] = useState(7.0);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const resumoMaterias = dadosBoletim?.resumoMaterias || [];
+
+  const formatNotaLabel = (key) => {
+    if (key === '1a_av') return '1ª AV';
+    if (key === '2a_av') return '2ª AV';
+    if (key === '3a_av') return '3ª AV';
+    if (key === '4a_av') return '4ª AV';
+    return key.replace('_', ' ');
+  };
 
   if (!dadosBoletim || !dadosBoletim.disciplinas) {
     return (
@@ -122,6 +131,70 @@ const Dashboard = ({ dadosBoletim, setDadosBoletim }) => {
         {/* Painel Geral */}
         <PainelGeral stats={stats} />
 
+        {/* Resumo detalhado por disciplina */}
+        {resumoMaterias.length > 0 && (
+          <div className="mt-12">
+            <h2 className="text-2xl font-bold text-gray-800 mb-4">
+              📚 Resumo detalhado por disciplina
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {resumoMaterias.map((materia, index) => (
+                <article
+                  key={index}
+                  className="relative rounded-2xl border border-gray-200 bg-white shadow-sm p-5 space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-800">
+                      {materia.nome}
+                    </h3>
+                    <span className="text-xs uppercase tracking-wide text-gray-500">
+                      Média parcial: {materia.mediaParcial?.toFixed(1) ?? '-'}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+                    {Object.entries(materia.notas || {}).map(([key, value]) => (
+                      <span
+                        key={key}
+                        className="px-2 py-1 bg-gray-100 rounded-full"
+                      >
+                        {formatNotaLabel(key)}: {value ?? '-'}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-4 text-sm text-gray-600">
+                    <p>
+                      Média provisória:{' '}
+                      <span className="font-semibold">
+                        {materia.mediaProvisoria ?? '-'}
+                      </span>
+                    </p>
+                    <p>
+                      Pontos extras:{' '}
+                      <span className="font-semibold">{materia.pontosExtras}</span>
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    {materia.mediasParciaisBimestrais?.map((bimestre) => (
+                      <div
+                        key={bimestre.bimestre}
+                        className="rounded-xl border border-dashed border-gray-300 px-3 py-2 bg-gray-50"
+                      >
+                        <p className="text-gray-500">{bimestre.bimestre}</p>
+                        <p className="text-base font-semibold text-gray-800">
+                          {bimestre.mediaParcial ?? '-'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Cards de Disciplinas */}
         <div className="mt-8">
           <h2 className="text-2xl font-bold text-gray-800 mb-6">
@@ -137,7 +210,19 @@ const Dashboard = ({ dadosBoletim, setDadosBoletim }) => {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {dadosBoletim.disciplinas.map((disciplina, index) => (
-                <DisciplinaCard key={index} disciplina={disciplina} />
+                <DisciplinaCard 
+                  key={index} 
+                  disciplina={disciplina}
+                  mediaMinima={mediaMinima}
+                  onUpdate={(disciplinaAtualizada) => {
+                    const novasDisciplinas = [...dadosBoletim.disciplinas];
+                    novasDisciplinas[index] = disciplinaAtualizada;
+                    setDadosBoletim({
+                      ...dadosBoletim,
+                      disciplinas: novasDisciplinas
+                    });
+                  }}
+                />
               ))}
             </div>
           )}
@@ -148,4 +233,3 @@ const Dashboard = ({ dadosBoletim, setDadosBoletim }) => {
 };
 
 export default Dashboard;
-

@@ -26,8 +26,13 @@ Edite `server_python/.env`:
 PORT=5001
 LLM_PROVIDER=openai          # ou "ollama" para usar local
 OPENAI_API_KEY=sk-...        # sua chave OpenAI (se usar OpenAI)
-OCR_ENGINE=paddleocr         # ou "tesseract"
+OCR_ENGINE=ollama-ocr        # ou "paddleocr" / "tesseract"
+OLLAMA_OCR_MODEL=llama3.2-vision:11b
+OLLAMA_BASE_URL=http://localhost:11434/api/generate
+OLLAMA_OCR_LANGUAGE=pt
 ```
+
+> Para usar o OCR multimodal com Ollama, instale `ollama-ocr` (`pip install ollama-ocr`) e mantenha `ollama serve` rodando antes de iniciar o backend.
 
 **Escolha seu LLM:**
 
@@ -75,6 +80,7 @@ Isso inicia:
 
 - **OpenAI API Key** (se usar `LLM_PROVIDER=openai`)
 - **Ollama** (se usar `LLM_PROVIDER=ollama`): https://ollama.ai
+- **ollama-ocr** (para usar OCR multimodal com Ollama): `pip install ollama-ocr` e mantenha `ollama serve`
 - **Tesseract** (se usar `OCR_ENGINE=tesseract`):
   - macOS: `brew install tesseract tesseract-lang`
   - Ubuntu: `sudo apt-get install tesseract-ocr tesseract-ocr-por`
@@ -86,4 +92,3 @@ Veja [MIGRACAO_LLAMAINDEX.md](./MIGRACAO_LLAMAINDEX.md) para troubleshooting com
 ---
 
 **Pronto!** 🎉 Você está pronto para usar o sistema de análise de boletim com **LlamaIndex + AI**.
-

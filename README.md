@@ -5,7 +5,7 @@ Sistema web completo para análise de boletins escolares com OCR automático, c�
 ## 🚀 Funcionalidades
 
 - **Upload de foto do boletim**: Interface intuitiva para envio de imagens
-- **Extração automática de dados com IA**: OCR (PaddleOCR ou Tesseract) + LlamaIndex para extração estruturada
+- **Extração automática de dados com IA**: OCR com `ollama-ocr` (LLaVA/Llama3 Vision via Ollama, fallback PaddleOCR/Tesseract) + LlamaIndex para extração estruturada
   - **Precisão superior**: ~95%+ vs ~70-80% do método anterior
   - **Entende contexto**: LLM identifica disciplinas, notas e dados automaticamente
   - **Adaptável**: Funciona mesmo com variações no formato do boletim
@@ -27,7 +27,9 @@ Sistema web completo para análise de boletins escolares com OCR automático, c�
 ### Backend
 - **Python 3.8+** com FastAPI
 - **LlamaIndex**: Extração estruturada com LLM
-- **OCR**: PaddleOCR (recomendado) ou Tesseract
+- **OCR**: `ollama-ocr` (usa LLaVA 1.6 / Llama3.2 Vision via Ollama)
+  - Para sistemas sem Ollama, defina `OCR_ENGINE=paddleocr` ou `tesseract` como fallback
+  - Personalize o modelo (`OLLAMA_OCR_MODEL`), endpoint (`OLLAMA_BASE_URL`) e idioma (`OLLAMA_OCR_LANGUAGE`)
 - **LLM**: OpenAI GPT-4o-mini (recomendado) ou Ollama (gratuito, local)
 - **CORS**: Suporte para requisições cross-origin
 
@@ -48,6 +50,7 @@ Sistema web completo para análise de boletins escolares com OCR automático, c�
 ### Opcional (dependendo da configuração):
 - **OpenAI API Key** (se usar `LLM_PROVIDER=openai`) - [Obter chave](https://platform.openai.com/api-keys)
 - **Ollama** (se usar `LLM_PROVIDER=ollama`) - [Instalar Ollama](https://ollama.ai)
+- **ollama-ocr** (para usar OCR multimodal com Ollama): `pip install ollama-ocr` e mantenha `ollama serve` rodando
 - **Tesseract** (se usar `OCR_ENGINE=tesseract`):
   - macOS: `brew install tesseract tesseract-lang`
   - Ubuntu: `sudo apt-get install tesseract-ocr tesseract-ocr-por`
@@ -77,8 +80,13 @@ Edite o arquivo `.env`:
 PORT=5001
 LLM_PROVIDER=openai          # ou "ollama" para usar local
 OPENAI_API_KEY=sk-...        # sua chave OpenAI (se usar OpenAI)
-OCR_ENGINE=paddleocr         # ou "tesseract"
+OCR_ENGINE=ollama-ocr        # ou "paddleocr" / "tesseract"
+OLLAMA_OCR_MODEL=llama3.2-vision:11b
+OLLAMA_BASE_URL=http://localhost:11434/api/generate
+OLLAMA_OCR_LANGUAGE=pt
 ```
+
+> Para usar o OCR multimodal com Ollama, instale `ollama-ocr` (`pip install ollama-ocr`) e mantenha `ollama serve` rodando antes de iniciar o backend.
 
 **Escolha seu LLM:**
 - **OpenAI** (recomendado - mais rápido): Configure `OPENAI_API_KEY` no `.env`
@@ -158,6 +166,10 @@ Faz upload da imagem do boletim e retorna dados extraídos.
     ]
   }
 }
+
+Além dos dados acima, a resposta agora inclui:
+- `resumoMaterias`: JSON resumido com 1ª/2ª/3ª AV, média provisória, pontos extras, média parcial e as médias parciais bimestrais (1º ao 4º bimestre) por disciplina.
+- `resumoArquivo`: caminho relativo para o arquivo gerado em `server_python/summaries/summary-*.json`, que pode ser usado para conferência posterior.
 ```
 
 ### `POST /api/calculate`
@@ -233,9 +245,10 @@ Nota Necessária = (Total Necessário - Soma Atual) / Notas Faltantes
 ## 🔍 Detalhes Técnicos
 
 ### OCR + LlamaIndex
-- **OCR**: PaddleOCR (recomendado) ou Tesseract
-  - Idioma: Português (`por`)
-  - Processamento de imagens
+- **OCR**: `ollama-ocr` com modelos multimodais (LLaVA 1.6 / Llama3.2 Vision) executados no Ollama
+  - Idioma configurável via `OLLAMA_OCR_LANGUAGE` (padrão: `pt`)
+  - Requer `ollama serve` e o modelo configurado em `OLLAMA_OCR_MODEL` (ex: `llama3.2-vision:11b`)
+  - Fallback para `paddleocr` ou `tesseract` ao alternar `OCR_ENGINE`
 - **LlamaIndex**: Extração estruturada com LLM
   - Entende contexto do boletim
   - Extrai dados em formato JSON estruturado
@@ -303,6 +316,7 @@ O sistema identifica automaticamente:
 - Aguarde o processamento completo (pode levar alguns segundos)
 - Tente com uma imagem mais nítida
 - Verifique os logs do servidor para mais detalhes
+- Certifique-se de que o `ollama serve` está rodando e que o `ollama-ocr` está instalado antes de subir o backend
 
 ### Cálculos incorretos
 - Confira se os dados foram extraídos corretamente
@@ -330,4 +344,3 @@ Contribuições são bem-vindas! Sinta-se à vontade para abrir issues ou pull r
 ---
 
 Desenvolvido com ❤️ para facilitar a análise de boletins escolares.
-

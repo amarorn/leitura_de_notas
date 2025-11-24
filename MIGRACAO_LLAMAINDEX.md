@@ -53,7 +53,10 @@ Edite `server_python/.env`:
 PORT=5001
 LLM_PROVIDER=openai          # ou "ollama" para usar local
 OPENAI_API_KEY=sk-...        # sua chave OpenAI
-OCR_ENGINE=paddleocr         # ou "tesseract"
+OCR_ENGINE=ollama-ocr        # ou "paddleocr" / "tesseract"
+OLLAMA_OCR_MODEL=llama3.2-vision:11b
+OLLAMA_BASE_URL=http://localhost:11434/api/generate
+OLLAMA_OCR_LANGUAGE=pt
 ```
 
 ### 3. Escolher LLM Provider
@@ -75,13 +78,28 @@ LLM_PROVIDER=ollama
 
 ### 4. Escolher OCR Engine
 
-#### Opção A: PaddleOCR (recomendado - mais preciso)
-```env
-OCR_ENGINE=paddleocr
-# Instala automaticamente via pip
+#### Opção A: Ollama OCR (recomendado)
+```bash
+cd server_python
+source venv/bin/activate
+pip install ollama-ocr
+ollama serve
 ```
 
-#### Opção B: Tesseract (alternativa)
+```env
+OCR_ENGINE=ollama-ocr
+OLLAMA_OCR_MODEL=llama3.2-vision:11b
+OLLAMA_BASE_URL=http://localhost:11434/api/generate
+OLLAMA_OCR_LANGUAGE=pt
+```
+
+#### Opção B: PaddleOCR (fallback)
+```env
+OCR_ENGINE=paddleocr
+# Instalado automaticamente via pip
+```
+
+#### Opção C: Tesseract (alternativa)
 ```bash
 # macOS
 brew install tesseract tesseract-lang
@@ -122,7 +140,7 @@ npm run client
 ```
 [Imagem do Boletim]
         ↓
-[OCR (PaddleOCR/Tesseract)]
+[OCR (ollama-ocr via Ollama)]
         ↓
 [Texto extraído (com ruído)]
         ↓
@@ -193,6 +211,10 @@ brew install tesseract tesseract-lang
 sudo apt-get install tesseract-ocr tesseract-ocr-por
 ```
 
+### Erro: "Erro ao usar ollama-ocr"
+- Verifique se o pacote `ollama-ocr` está instalado (`pip install ollama-ocr`)
+- Garanta que o Ollama esteja rodando (`ollama serve`) e o modelo `OLLAMA_OCR_MODEL` foi baixado (`ollama list`)
+
 ### Erro: "OPENAI_API_KEY not found"
 - Configure no `.env` ou use Ollama (`LLM_PROVIDER=ollama`)
 
@@ -228,4 +250,3 @@ O servidor Node.js antigo (`server/index.js`) ainda existe mas não é mais usad
 - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
 - [FastAPI](https://fastapi.tiangolo.com/)
 - [Ollama](https://ollama.ai/)
-
